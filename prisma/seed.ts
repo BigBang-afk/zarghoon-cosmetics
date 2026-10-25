@@ -26,16 +26,19 @@ const COUNTRIES: [string, string][] = [
 ];
 
 async function main() {
-  const email = process.env.SEED_OWNER_EMAIL?.toLowerCase().trim();
-  const password = process.env.SEED_OWNER_PASSWORD;
-  if (!email || !password || password.length < 12) {
-    throw new Error("Set SEED_OWNER_EMAIL and SEED_OWNER_PASSWORD (12+ characters) in .env first.");
-  }
-
-  const existing = await db.adminUser.findUnique({ where: { email } });
-  if (existing) {
-    console.log(`Owner ${email} already exists (password not changed).`);
+  // Create the first Owner account, only if the store has no Owner yet.
+  // After the first deploy you can delete SEED_OWNER_PASSWORD from your settings.
+  const ownerCount = await db.adminUser.count({ where: { role: "OWNER" } });
+  if (ownerCount > 0) {
+    console.log("An Owner account already exists, skipping.");
   } else {
+    const email = process.env.SEED_OWNER_EMAIL?.toLowerCase().trim();
+    const password = process.env.SEED_OWNER_PASSWORD;
+    if (!email || !password || password.length < 12) {
+      throw new Error(
+        "No Owner account yet. Set SEED_OWNER_EMAIL and SEED_OWNER_PASSWORD (12+ characters) first.",
+      );
+    }
     await db.adminUser.create({
       data: { email, name: "Store Owner", role: "OWNER", passwordHash: await hashPassword(password) },
     });

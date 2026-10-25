@@ -8,6 +8,38 @@ Built with Next.js 16 (App Router), TypeScript, Tailwind CSS 4, PostgreSQL + Pri
 
 ---
 
+## Launch on Vercel (no computer setup needed)
+
+You need free accounts on **GitHub** (stores the code) and **Vercel** (runs the website).
+Sign up for Vercel using "Continue with GitHub".
+
+1. **Import the project.** On https://vercel.com click **Add New → Project**, find the
+   `zarghoon-cosmetics` repository and click **Import**. Do not click Deploy yet.
+2. **Add your settings.** Open **Environment Variables** on that screen and add:
+
+   | Name | Value |
+   |---|---|
+   | `AUTH_SECRET` | A long random text (at least 32 characters). You can make one at https://generate-secret.vercel.app/32 |
+   | `SEED_OWNER_EMAIL` | The email you will log in with |
+   | `SEED_OWNER_PASSWORD` | A strong password, 12+ characters |
+
+3. Click **Deploy**. The first deploy **fails** because there is no database yet. That is expected.
+4. **Add the database.** In your Vercel project open **Storage → Create Database → Neon
+   (Serverless Postgres)**, choose the free plan and a region close to your customers, and connect
+   it to the project. Vercel adds `DATABASE_URL` and `DATABASE_URL_UNPOOLED` for you.
+5. **Deploy again.** Open **Deployments**, click the **⋯** next to the latest one, and choose **Redeploy**.
+   During the build, the database tables and your Owner account are created automatically.
+6. Open `https://<your-project>.vercel.app/admin` and log in.
+7. **Optional, for safety:** after the first successful login, delete `SEED_OWNER_PASSWORD` from
+   **Settings → Environment Variables**. It is only needed once. Change your password at
+   **Admin → your name → Change password**.
+
+From now on, every time new code is pushed to GitHub, Vercel updates the website by itself.
+
+---
+
+## Running on your own computer (optional, for developers)
+
 ## 1. What you need on your computer
 
 1. **Node.js 22** (or newer). Download it from https://nodejs.org (pick the "LTS" version).
