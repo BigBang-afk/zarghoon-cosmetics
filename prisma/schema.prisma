@@ -1,0 +1,561 @@
+// Zarghoon Cosmetics — database schema
+//
+// Money rule: every price is stored as a whole number of US cents in the
+// base currency (USD). Example: $12.50 is stored as 1250. Other currencies
+// are only for display and are converted using the rates in `Currency`.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────── Admin & security ───────────────────────────────
+
+enum AdminRole {
+  OWNER // full access, including staff accounts, settings and API keys
+  STAFF // day-to-day work: products, orders, customers, content
+}
+
+model AdminUser {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String
+  passwordHash   String
+  role           AdminRole @default(STAFF)
+  isActive       Boolean   @default(true)
+  // Bumped when the password changes or the account is disabled, which
+  // signs the user out of every device.
+  sessionVersion Int       @default(0)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  activity ActivityLog[]
+  refunds  Refund[]
+}
+
+// Every admin login try, used to block password guessing.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+}
+
+// "Who changed what and when".
+model ActivityLog {
+  id          String     @id @default(cuid())
+  adminUserId String?
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  action      String // e.g. "product.update", "order.refund", "auth.login"
+  entityType  String? // e.g. "Product"
+  entityId    String?
+  details     Json?
+  createdAt   DateTime   @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+// ─────────────────────────────── Store settings ───────────────────────────────
+
+// A single row (id = 1) holding store-wide settings.
+model StoreSettings {
+  id                  Int      @id @default(1)
+  storeName           String   @default("Zarghoon Cosmetics")
+  logoUrl             String?
+  supportEmail        String?
+  // Default selling price = CJ cost × this markup (e.g. 3.00 = 3×).
+  defaultMarkup       Decimal  @default(3.00) @db.Decimal(6, 2)
+  taxDutyNote         String   @default("Import taxes and duties may be charged by your country's customs on delivery and are paid by the customer.")
+  announcementText    String?
+  announcementLink    String?
+  announcementEnabled Boolean  @default(false)
+  // Used for profit estimates: payment fee = percent of total + fixed cents.
+  paymentFeePercent   Decimal  @default(3.90) @db.Decimal(5, 2)
+  paymentFeeFixedCents Int     @default(30)
+  autoSendPaidOrdersToCj Boolean @default(false)
+  updatedAt           DateTime @updatedAt
+}
+
+model Currency {
+  code      String   @id // ISO code: USD, GBP, EUR, AED, SAR, PKR
+  name      String
+  symbol    String
+  // How many units of this currency equal 1 USD (USD itself = 1).
+  rateToUsd Decimal  @db.Decimal(18, 6)
+  decimals  Int      @default(2)
+  isEnabled Boolean  @default(true)
+  sortOrder Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model ShippingCountry {
+  code      String  @id // ISO 3166-1 alpha-2, e.g. "GB"
+  name      String
+  isEnabled Boolean @default(true)
+}
+
+// ─────────────────────────────── Catalogue ───────────────────────────────
+
+model Category {
+  id             String    @id @default(cuid())
+  slug           String    @unique
+  name           String
+  description    String?
+  imageUrl       String?
+  sortOrder      Int       @default(0)
+  isVisible      Boolean   @default(true)
+  seoTitle       String?
+  seoDescription String?
+  products       Product[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+enum ProductStatus {
+  DRAFT // hidden, being edited (new CJ imports land here)
+  ACTIVE // visible in the shop
+  ARCHIVED // hidden, kept for old orders
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  slug           String        @unique
+  title          String
+  description    String        @default("")
+  ingredients    String?
+  howToUse       String?
+  safetyInfo     String?
+  status         ProductStatus @default(DRAFT)
+  tags           String[]
+  categoryId     String?
+  category       Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Per-product markup; empty means "use the store default".
+  markup         Decimal?      @db.Decimal(6, 2)
+  seoTitle       String?
+  seoDescription String?
+  // CJdropshipping link (empty for products not from CJ).
+  cjProductId    String?       @unique
+  cjProductSku   String?
+  // Set by the sync job when CJ changes a cost, so the admin can review it.
+  costChanged    Boolean       @default(false)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  images   ProductImage[]
+  variants ProductVariant[]
+  reviews  Review[]
+
+  @@index([status])
+  @@index([categoryId])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  position  Int     @default(0)
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id                  String   @id @default(cuid())
+  productId           String
+  product             Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  title               String // e.g. "Rose / 30 ml"
+  options             Json? // e.g. { "Shade": "Rose", "Size": "30 ml" }
+  sku                 String?
+  cjVariantId         String?  @unique // CJ "vid"
+  cjCostCents         Int? // what CJ charges us per unit
+  previousCjCostCents Int? // CJ cost before the last change
+  priceCents          Int // what the customer pays
+  // true = admin typed the price by hand; false = price follows the markup.
+  priceOverride       Boolean  @default(false)
+  compareAtPriceCents Int? // "was" price shown crossed out
+  stock               Int      @default(0)
+  weightGrams         Int?
+  imageUrl            String?
+  position            Int      @default(0)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([productId])
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  HIDDEN
+}
+
+// Only customers with a delivered order for the product may review it.
+model Review {
+  id         String       @id @default(cuid())
+  productId  String
+  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId    String?
+  order      Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  authorName String
+  rating     Int // 1–5
+  title      String?
+  body       String
+  status     ReviewStatus @default(PENDING)
+  createdAt  DateTime     @default(now())
+
+  @@index([productId, status])
+}
+
+// ─────────────────────────────── Customers & carts ───────────────────────────────
+
+model Customer {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  name             String?
+  phone            String?
+  // Empty for guest customers; set when they create an account.
+  passwordHash     String?
+  acceptsMarketing Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  addresses Address[]
+  orders    Order[]
+  carts     Cart[]
+  reviews   Review[]
+}
+
+model Address {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  fullName    String
+  line1       String
+  line2       String?
+  city        String
+  state       String?
+  postalCode  String?
+  countryCode String
+  phone       String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([customerId])
+}
+
+model Cart {
+  id                    String     @id @default(cuid())
+  token                 String     @unique // random id kept in the shopper's cookie
+  customerId            String?
+  customer              Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  email                 String? // captured at checkout, used for abandoned-cart email
+  discountCode          String?
+  countryCode           String?
+  abandonedEmailSentAt  DateTime?
+  orderId               String?    @unique // set once the cart became an order
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  items CartItem[]
+}
+
+model CartItem {
+  id        String         @id @default(cuid())
+  cartId    String
+  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  quantity  Int
+
+  @@unique([cartId, variantId])
+}
+
+// ─────────────────────────────── Orders & payments ───────────────────────────────
+
+enum OrderStatus {
+  UNPAID
+  PAID
+  SENT_TO_CJ
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  orderNumber         Int         @unique @default(autoincrement()) // shown as ZC-1001
+  customerId          String?
+  customer            Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  email               String
+  phone               String?
+  status              OrderStatus @default(UNPAID)
+
+  // Amounts in USD cents (the currency we actually charge in).
+  subtotalCents       Int
+  shippingCents       Int
+  discountCents       Int         @default(0)
+  taxCents            Int         @default(0)
+  totalCents          Int
+  refundedCents       Int         @default(0)
+
+  // Display currency chosen by the shopper, with the rate used at that time.
+  displayCurrency     String      @default("USD")
+  displayRate         Decimal     @default(1) @db.Decimal(18, 6)
+
+  // Our costs, for profit reports.
+  cjProductCostCents  Int         @default(0)
+  cjShippingCostCents Int         @default(0)
+  paymentFeeCents     Int         @default(0)
+
+  // Shipping address (copied, so later address edits don't change old orders).
+  shipName            String
+  shipLine1           String
+  shipLine2           String?
+  shipCity            String
+  shipState           String?
+  shipPostalCode      String?
+  shipCountryCode     String
+  shipPhone           String?
+  shippingMethod      String? // CJ logistic name, e.g. "CJPacket Ordinary"
+
+  discountId          String?
+  discount            Discount?   @relation(fields: [discountId], references: [id], onDelete: SetNull)
+  discountCode        String?
+
+  customerNote        String?
+  internalNote        String?
+
+  // CJdropshipping fulfilment.
+  cjOrderId           String?     @unique
+  cjOrderStatus       String?
+  cjSentAt            DateTime?
+  cjError             String?
+  trackingNumber      String?
+  trackingUrl         String?
+  carrier             String?
+
+  paidAt              DateTime?
+  shippedAt           DateTime?
+  deliveredAt         DateTime?
+  cancelledAt         DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  items    OrderItem[]
+  payments Payment[]
+  refunds  Refund[]
+  reviews  Review[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([email])
+}
+
+model OrderItem {
+  id              String          @id @default(cuid())
+  orderId         String
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId       String?
+  variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  productId       String?
+  // Copied at purchase time.
+  title           String
+  variantTitle    String?
+  sku             String?
+  cjVariantId     String?
+  imageUrl        String?
+  quantity        Int
+  unitPriceCents  Int
+  unitCjCostCents Int             @default(0)
+
+  @@index([orderId])
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider    String // e.g. "test", "2checkout", "payfast"
+  providerRef String // the provider's payment/session id
+  status      PaymentStatus @default(PENDING)
+  amountCents Int
+  currency    String        @default("USD")
+  feeCents    Int?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([provider, providerRef])
+  @@index([orderId])
+}
+
+// Remembers every webhook we processed so the same event is never applied twice.
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  source      String // "payment:2checkout", "cj"
+  eventId     String
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@unique([source, eventId])
+}
+
+model Refund {
+  id          String     @id @default(cuid())
+  orderId     String
+  order       Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountCents Int
+  reason      String?
+  providerRef String?
+  adminUserId String?
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+}
+
+// ─────────────────────────────── Discounts ───────────────────────────────
+
+enum DiscountType {
+  PERCENTAGE // value = percent, e.g. 15
+  FIXED_AMOUNT // value = USD cents off, e.g. 500 = $5
+  FREE_SHIPPING // value ignored
+}
+
+model Discount {
+  id                    String       @id @default(cuid())
+  code                  String       @unique // stored upper-case
+  type                  DiscountType
+  value                 Int          @default(0)
+  minOrderCents         Int?
+  startsAt              DateTime?
+  expiresAt             DateTime?
+  usageLimit            Int? // total uses allowed
+  usageLimitPerCustomer Int?
+  usedCount             Int          @default(0)
+  isActive              Boolean      @default(true)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  orders Order[]
+}
+
+// ─────────────────────────────── Content ───────────────────────────────
+
+model Banner {
+  id         String   @id @default(cuid())
+  title      String
+  subtitle   String?
+  imageUrl   String
+  linkUrl    String?
+  buttonText String?
+  position   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Editable text pages: about, shipping-policy, returns-policy, privacy, terms.
+model Page {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  title          String
+  body           String // Markdown
+  seoTitle       String?
+  seoDescription String?
+  updatedAt      DateTime @updatedAt
+}
+
+model FaqItem {
+  id        String  @id @default(cuid())
+  question  String
+  answer    String
+  position  Int     @default(0)
+  isVisible Boolean @default(true)
+}
+
+// ─────────────────────────────── Email ───────────────────────────────
+
+model EmailTemplate {
+  key       String   @id // ORDER_CONFIRMATION, SHIPPING_CONFIRMATION, DELIVERED, ABANDONED_CART, ADMIN_NEW_ORDER, ADMIN_CJ_FAILED
+  subject   String
+  body      String // simple text with {{placeholders}}
+  updatedAt DateTime @updatedAt
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  to          String
+  templateKey String
+  status      String // "sent" | "failed" | "skipped"
+  providerId  String?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ─────────────────────────────── CJdropshipping ───────────────────────────────
+
+// A single row (id = 1) with the current CJ tokens.
+model CjToken {
+  id                    Int      @id @default(1)
+  accessToken           String
+  accessTokenExpiresAt  DateTime
+  refreshToken          String
+  refreshTokenExpiresAt DateTime
+  updatedAt             DateTime @updatedAt
+}
+
+// Every call to the CJ API, visible in admin.
+model CjLog {
+  id           String   @id @default(cuid())
+  method       String
+  endpoint     String
+  httpStatus   Int?
+  success      Boolean
+  cjCode       Int?
+  message      String?
+  durationMs   Int
+  requestBody  Json?
+  responseBody Json?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// History of background jobs (stock sync, order sending, tracking).
+model JobRun {
+  id         String    @id @default(cuid())
+  job        String
+  status     String // "running" | "success" | "failed"
+  summary    String?
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([job, startedAt])
+}
