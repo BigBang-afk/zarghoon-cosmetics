@@ -4,7 +4,8 @@ An international dropshipping store with its own admin panel. Products come from
 
 Built with Next.js 16 (App Router), TypeScript, Tailwind CSS 4, PostgreSQL + Prisma 7, and Auth.js.
 
-> **Build status:** Stage 1 of 7 is done: project setup, database, admin login with roles.
+> **Build status:** Stages 1–2 of 7 are done: admin login with roles, products in the admin, and the
+> shop (home, shop all, categories, product pages) with sample products.
 
 ---
 
@@ -97,11 +98,26 @@ Open http://localhost:3000 for the shop and http://localhost:3000/admin for the 
 | `npm run dev` | Starts the site for development (reloads when you change code) |
 | `npm run build` | Builds the site the same way Vercel will |
 | `npm run lint` / `npm run typecheck` | Checks the code for mistakes |
+| `npm test` | Runs the automated tests (pricing and money) |
 | `npm run db:migrate` | Applies database changes |
 | `npm run db:seed` | Adds starter data (safe to run again) |
 | `npm run db:studio` | Opens a simple website to look at your database tables |
 
-## 4. Admin roles
+## 4. Products and prices
+
+- **Admin → Products** lists everything, with search, filters and bulk changes (show/hide, category,
+  markup, tags, delete). Click a product to edit it; **Add product** creates one by hand.
+- **Price rule:** when a variant has a CJ cost, its price is **CJ cost × markup, rounded up to .99**
+  (e.g. $4.20 × 3 = $12.60 → **$12.99**). Tick **Manual price** to type your own price instead.
+- The **store default markup** is in **Admin → Settings** (Owner only). Changing it re-prices every
+  product that has no markup of its own and no manual price. A product can also have its own markup.
+- **Currencies:** prices are stored and charged in US dollars. GBP, EUR, AED, SAR and PKR are shown
+  to shoppers using the exchange rates you type in **Settings → Currencies**.
+- **Sample products:** 12 sample products are added once, so you can test. Delete them all with
+  **Products → Delete all sample products** before launch; they will not come back.
+- Images: paste image links (`https://…`). CJ product images are added automatically in Stage 4.
+
+## 5. Admin roles
 
 - **Owner**: everything, including adding staff, settings and API keys.
 - **Staff**: day-to-day work (products, orders, customers, content), but no staff or settings pages.
@@ -109,7 +125,7 @@ Open http://localhost:3000 for the shop and http://localhost:3000/admin for the 
 Owners add staff at **Admin → Staff**. Anyone can change their own password by clicking their
 name at the top right.
 
-## 5. How the login is protected
+## 6. How the login is protected
 
 - Passwords are hashed with Argon2id (they are never stored as plain text).
 - After 5 wrong passwords for one email (or 20 from one internet address) within 15 minutes,
@@ -119,7 +135,7 @@ name at the top right.
 - Every admin page checks the login and role on the server, not just in the browser.
 - Every sign-in and staff change is recorded in **Admin → Activity log**.
 
-## 6. Project layout (where things live)
+## 7. Project layout (where things live)
 
 ```
 prisma/schema.prisma     The database blueprint (all tables)
@@ -127,8 +143,11 @@ prisma/seed.ts           Starter data
 src/auth.ts              Admin login setup (Auth.js)
 src/proxy.ts             Sends signed-out visitors from /admin to the login page
 src/lib/                 Shared server code (database, passwords, rate limit, activity log)
+src/lib/pricing.ts       Price rules (markup, rounding) — tested in tests/pricing.test.ts
+src/lib/catalog.ts       Reads products for the shop (cached for speed)
 src/app/admin/           The admin panel pages
-src/app/                 The shop pages (built in Stage 2)
+src/app/(shop)/          The shop pages
+scripts/                 Build script for Vercel, sample image generator
 ```
 
 ## Coming next

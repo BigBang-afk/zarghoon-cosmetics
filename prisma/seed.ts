@@ -4,6 +4,8 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { hashPassword } from "../src/lib/password";
+import { priceFromCost } from "../src/lib/pricing";
+import { SAMPLE_CATEGORIES, SAMPLE_PRODUCTS } from "./sample-products";
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
@@ -57,6 +59,62 @@ async function main() {
     await db.shippingCountry.upsert({ where: { code }, update: {}, create: { code, name } });
   }
   console.log(`Settings, ${CURRENCIES.length} currencies and ${COUNTRIES.length} shipping countries are ready.`);
+
+  await seedSampleProducts();
+}
+
+// Adds the sample catalogue only once, ever. If you delete the samples, they stay deleted.
+async function seedSampleProducts() {
+  const settings = await db.storeSettings.findUniqueOrThrow({ where: { id: 1 } });
+  if (settings.sampleProductsSeededAt) {
+    console.log("Sample products were already added before, skipping.");
+    return;
+  }
+  const markup = Number(settings.defaultMarkup);
+
+  const categoryIds = new Map<string, string>();
+  for (const [i, c] of SAMPLE_CATEGORIES.entries()) {
+    const row = await db.category.upsert({ where: { slug: c.slug }, update: {}, create: { ...c, sortOrder: i } });
+    categoryIds.set(c.slug, row.id);
+  }
+
+  for (const [i, p] of SAMPLE_PRODUCTS.entries()) {
+    if (await db.product.findUnique({ where: { slug: p.slug } })) continue;
+    await db.product.create({
+      data: {
+        slug: p.slug,
+        title: p.title,
+        description: p.description,
+        ingredients: p.ingredients,
+        howToUse: p.howToUse,
+        safetyInfo: p.safetyInfo,
+        tags: p.tags,
+        status: "ACTIVE",
+        isSample: true,
+        categoryId: categoryIds.get(p.category),
+        // Stagger creation times so "newest" sorting has a stable order.
+        createdAt: new Date(Date.now() - i * 60_000),
+        images: {
+          create: [1, 2].map((n, position) => ({ url: `/samples/${p.slug}-${n}.svg`, alt: p.title, position })),
+        },
+        variants: {
+          create: p.variants.map((v, position) => ({
+            title: Object.values(v.options).join(" / "),
+            options: v.options,
+            sku: `ZC-${p.slug.slice(0, 10).toUpperCase()}-${position + 1}`,
+            cjCostCents: v.cost,
+            priceCents: priceFromCost(v.cost, markup),
+            compareAtPriceCents: v.compareAt ?? null,
+            stock: v.stock ?? 100,
+            imageUrl: v.image ?? null,
+            position,
+          })),
+        },
+      },
+    });
+  }
+  await db.storeSettings.update({ where: { id: 1 }, data: { sampleProductsSeededAt: new Date() } });
+  console.log(`Added ${SAMPLE_PRODUCTS.length} sample products in ${SAMPLE_CATEGORIES.length} categories.`);
 }
 
 main()

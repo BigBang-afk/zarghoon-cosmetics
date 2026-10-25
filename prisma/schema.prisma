@@ -83,6 +83,8 @@ model StoreSettings {
   paymentFeePercent   Decimal  @default(3.90) @db.Decimal(5, 2)
   paymentFeeFixedCents Int     @default(30)
   autoSendPaidOrdersToCj Boolean @default(false)
+  // Set once the sample products were added, so they are never re-added.
+  sampleProductsSeededAt DateTime?
   updatedAt           DateTime @updatedAt
 }
 
@@ -148,6 +150,8 @@ model Product {
   cjProductSku   String?
   // Set by the sync job when CJ changes a cost, so the admin can review it.
   costChanged    Boolean       @default(false)
+  // Sample products from the seed script (delete them before launch).
+  isSample       Boolean       @default(false)
   lastSyncedAt   DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt

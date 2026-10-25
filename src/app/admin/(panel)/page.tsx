@@ -5,7 +5,7 @@ export const metadata = { title: "Home" };
 
 const STAGES = [
   { n: 1, title: "Project setup, database & admin login", done: true },
-  { n: 2, title: "Products in admin + shop product pages" },
+  { n: 2, title: "Products in admin + shop product pages", done: true },
   { n: 3, title: "Cart & checkout (test payments)" },
   { n: 4, title: "CJ connection + product search/import" },
   { n: 5, title: "Send orders to CJ + tracking sync" },

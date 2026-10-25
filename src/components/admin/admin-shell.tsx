@@ -20,7 +20,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Home", href: "/admin", icon: Home },
   { label: "Orders", href: "/admin/orders", icon: ShoppingBag, stage: 3 },
-  { label: "Products", href: "/admin/products", icon: Boxes, stage: 2 },
+  { label: "Products", href: "/admin/products", icon: Boxes },
   { label: "CJ Import", href: "/admin/cj", icon: PackageSearch, stage: 4 },
   { label: "Customers", href: "/admin/customers", icon: Users, stage: 6 },
   { label: "Discounts", href: "/admin/discounts", icon: Percent, stage: 6 },
@@ -31,7 +31,7 @@ const NAV: NavItem[] = [
 const NAV_BOTTOM: NavItem[] = [
   { label: "Staff", href: "/admin/staff", icon: UserCog, ownerOnly: true },
   { label: "Activity log", href: "/admin/activity", icon: Activity },
-  { label: "Settings", href: "/admin/settings", icon: Settings, stage: 6 },
+  { label: "Settings", href: "/admin/settings", icon: Settings, ownerOnly: true },
 ];
 
 export function AdminShell({
@@ -105,15 +105,10 @@ export function AdminShell({
           <button className="lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu className="size-5" />
           </button>
-          <div className="relative max-w-md flex-1">
+          <form action="/admin/products" className="relative max-w-md flex-1" role="search">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" />
-            <input
-              type="search"
-              placeholder="Search (available from Stage 2)"
-              disabled
-              className="input bg-stone-50 pl-9"
-            />
-          </div>
+            <input type="search" name="q" placeholder="Search products" aria-label="Search products" className="input bg-stone-50 pl-9" />
+          </form>
           <div className="ml-auto flex items-center gap-3">
             <Link href="/admin/account" className="hidden text-right sm:block">
               <span className="block text-sm font-medium">{admin.name}</span>
