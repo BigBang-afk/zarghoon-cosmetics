@@ -23,7 +23,9 @@ Sign up for Vercel using "Continue with GitHub".
    | `SEED_OWNER_EMAIL` | The email you will log in with |
    | `SEED_OWNER_PASSWORD` | A strong password, 12+ characters |
 
-3. Click **Deploy**. The first deploy **fails** because there is no database yet. That is expected.
+3. Click **Deploy**. The first deploy **fails** because there is no database yet. That is expected:
+   the build log shows a "SETUP NEEDED" box explaining what to add. Any later failure also shows
+   that box (or the step that failed) in plain English.
 4. **Add the database.** In your Vercel project open **Storage → Create Database → Neon
    (Serverless Postgres)**, choose the free plan and a region close to your customers, and connect
    it to the project. Vercel adds `DATABASE_URL` and `DATABASE_URL_UNPOOLED` for you.
