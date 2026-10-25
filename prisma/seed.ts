@@ -34,9 +34,12 @@ async function main() {
   } else {
     const email = process.env.SEED_OWNER_EMAIL?.toLowerCase().trim();
     const password = process.env.SEED_OWNER_PASSWORD;
-    if (!email || !password || password.length < 12) {
+    const where = "in Vercel → Settings → Environment Variables (tick Production), then Redeploy";
+    if (!email) throw new Error(`SEED_OWNER_EMAIL is missing. Add it ${where}.`);
+    if (!password) throw new Error(`SEED_OWNER_PASSWORD is missing. Add it ${where}.`);
+    if (password.length < 12) {
       throw new Error(
-        "No Owner account yet. Set SEED_OWNER_EMAIL and SEED_OWNER_PASSWORD (12+ characters) first.",
+        `SEED_OWNER_PASSWORD is only ${password.length} characters; it needs at least 12. Change it ${where}.`,
       );
     }
     await db.adminUser.create({
